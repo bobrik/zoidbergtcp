@@ -1,0 +1,39 @@
+{
+	"ImportPath": "github.com/bobrik/zoidbergtcp",
+	"GoVersion": "go1.5.1",
+	"Deps": [
+		{
+			"ImportPath": "github.com/bobrik/zoidberg/application",
+			"Comment": "0.5.0-4-ga5658ce",
+			"Rev": "a5658ce66542559773bda54842b1ecb9634a63fe"
+		},
+		{
+			"ImportPath": "github.com/bobrik/zoidberg/balancer",
+			"Comment": "0.5.0-4-ga5658ce",
+			"Rev": "a5658ce66542559773bda54842b1ecb9634a63fe"
+		},
+		{
+			"ImportPath": "github.com/bobrik/zoidberg/marathon",
+			"Comment": "0.5.0-4-ga5658ce",
+			"Rev": "a5658ce66542559773bda54842b1ecb9634a63fe"
+		},
+		{
+			"ImportPath": "github.com/bobrik/zoidberg/mesos",
+			"Comment": "0.5.0-4-ga5658ce",
+			"Rev": "a5658ce66542559773bda54842b1ecb9634a63fe"
+		},
+		{
+			"ImportPath": "github.com/bobrik/zoidberg/state",
+			"Comment": "0.5.0-4-ga5658ce",
+			"Rev": "a5658ce66542559773bda54842b1ecb9634a63fe"
+		},
+		{
+			"ImportPath": "github.com/gambol99/go-marathon",
+			"Rev": "5203f70909ebe23cf0a1ce6eab2ac172fe8ab1b3"
+		},
+		{
+			"ImportPath": "github.com/golang/glog",
+			"Rev": "fca8c8854093a154ff1eb580aae10276ad6b1b5f"
+		}
+	]
+}

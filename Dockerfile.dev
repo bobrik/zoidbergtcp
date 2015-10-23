@@ -1,0 +1,10 @@
+FROM alpine:3.2
+
+RUN apk --update add go
+
+COPY . /go/src/github.com/bobrik/zoidbergtcp
+
+RUN export GOPATH=/go:/go/src/github.com/bobrik/zoidbergtcp/Godeps/_workspace && \
+    go get github.com/bobrik/zoidbergtcp/...
+
+ENTRYPOINT ["/go/bin/zoidberg-tcp"]
