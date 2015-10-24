@@ -38,7 +38,7 @@ type proxy struct {
 func (p *proxy) setState(port int, servers []application.Server, versions state.Versions) {
 	p.mutex.Lock()
 
-	upstreams := upstreams{}
+	u := upstreams{}
 
 	for _, s := range servers {
 		if len(s.Ports) < port {
@@ -55,19 +55,19 @@ func (p *proxy) setState(port int, servers []application.Server, versions state.
 			continue
 		}
 
-		upstreams = append(upstreams, upstream{
+		u = append(u, upstream{
 			host:   s.Host,
 			port:   s.Ports[port],
 			weight: w,
 		})
 	}
 
-	sort.Sort(upstreams)
+	sort.Sort(u)
 
-	if !reflect.DeepEqual(upstreams, p.upstreams) {
-		p.upstreams = upstreams
+	if !reflect.DeepEqual(u, p.upstreams) {
+		p.upstreams = u
 
-		log.Printf("updated upstreams for %s: %s\n", p.listener.Addr(), upstreams)
+		log.Printf("updated upstreams for %s: %s\n", p.listener.Addr(), u)
 	}
 
 	p.mutex.Unlock()
