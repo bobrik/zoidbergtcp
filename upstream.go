@@ -2,9 +2,6 @@ package zoidbergtcp
 
 import "fmt"
 
-// upstreams is a list of upstreams
-type upstreams []upstream
-
 // upstream is a single upstream server
 type upstream struct {
 	host   string
@@ -21,6 +18,9 @@ func (u upstream) addr() string {
 func (u upstream) String() string {
 	return u.addr()
 }
+
+// upstreams is a list of upstreams
+type upstreams []upstream
 
 func (u upstreams) Len() int           { return len(u) }
 func (u upstreams) Swap(i, j int)      { u[i], u[j] = u[j], u[i] }
