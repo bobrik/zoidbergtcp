@@ -6,3 +6,5 @@ RUN apk --update add go && \
     export GOPATH=/go:/go/src/github.com/bobrik/zoidbergtcp/Godeps/_workspace && \
     go get github.com/bobrik/zoidbergtcp/... && \
     apk del go
+
+ENTRYPOINT ["/go/bin/zoidberg-tcp"]
