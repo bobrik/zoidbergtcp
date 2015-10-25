@@ -1,8 +1,10 @@
 package zoidbergtcp
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"sync"
 
 	"github.com/bobrik/zoidberg/application"
@@ -22,6 +24,48 @@ func NewManager() *Manager {
 		mutex:   sync.Mutex{},
 		proxies: map[string]*proxy{},
 	}
+}
+
+// ServeMux returns a ServeMux object that is used to manage proxies
+func (m *Manager) ServeMux() *http.ServeMux {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		state := balancer.State{}
+
+		err := json.NewDecoder(r.Body).Decode(&state)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		m.UpdateState(state)
+	})
+
+	mux.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
+		p := map[string]proxyStats{}
+
+		m.mutex.Lock()
+		for k, v := range m.proxies {
+			p[k] = v.stats()
+		}
+		m.mutex.Unlock()
+
+		s, err := json.Marshal(stats{Servers: p})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Add("Content-type", "application/json")
+		_, _ = w.Write(s)
+	})
+
+	mux.HandleFunc("/_health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	return mux
 }
 
 // UpdateState updates manager's view of the world

@@ -50,6 +50,43 @@ forwarding connections to all application instances on the port at index `0`.
 It is possible to use [zoidberg-nginx](https://github.com/bobrik/zoidberg-nginx)
 with `zoidberg-tcp` when some ports are HTTP and some ports are plain TCP.
 
+## Stats endpoint
+
+`GET /stats` returns stats about used upstreams:
+
+* `in` number of bytes received.
+* `out` number of bytes sent.
+* `errors` number of connection errors.
+* `connected` number of connected clients.
+* `connections` total number of connections.
+
+Example output (formatted):
+
+```json
+{
+  "servers": {
+    "127.0.0.1:22222": {
+      "upstreams": {
+        "172.16.91.128:11158": {
+          "in": 538,
+          "out": 158,
+          "errors": 0,
+          "connected": 0,
+          "connections": 2
+        },
+        "172.16.91.128:11250": {
+          "in": 285,
+          "out": 79,
+          "errors": 0,
+          "connected": 0,
+          "connections": 1
+        }
+      }
+    }
+  }
+}
+```
+
 ## TODO
 
 * [SO_REUSEPORT](https://lwn.net/Articles/542629/)
