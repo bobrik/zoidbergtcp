@@ -184,7 +184,7 @@ func (p *proxy) serve(c net.Conn) {
 }
 
 // copy copies data between two connections and writes stats
-func (p *proxy) copy(client, upstream net.Conn, s *upstreamStats) error {
+func (p *proxy) copy(client, upstream io.ReadWriter, s *upstreamStats) error {
 	ch := make(chan error, 1)
 
 	go p.chanCopy(ch, client, upstream, &s.Out)
