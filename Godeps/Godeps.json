@@ -1,7 +1,7 @@
 {
 	"ImportPath": "github.com/bobrik/zoidbergtcp",
-	"GoVersion": "go1.6",
-	"GodepVersion": "v60",
+	"GoVersion": "go1.7",
+	"GodepVersion": "v74",
 	"Deps": [
 		{
 			"ImportPath": "github.com/beorn7/perks/quantile",
