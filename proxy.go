@@ -9,139 +9,205 @@ import (
 	"sort"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/bobrik/zoidberg/application"
 	"github.com/bobrik/zoidberg/state"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // copySize defines the size of a chunk that is used when copying data,
 // it also defines minimum granularity for stats
 const copySize = 4096
 
+var (
+	bytesSent = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "zoidberg_proxy_bytes_sent",
+			Help: "bytes sent to the clients",
+		},
+		[]string{"app", "upstream"},
+	)
+
+	bytesReceived = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "zoidberg_proxy_bytes_received",
+			Help: "bytes received from the clients",
+		},
+		[]string{"app", "upstream"},
+	)
+
+	connectionsAccepted = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "zoidberg_proxy_connections_accepted",
+			Help: "number of client connections accepted",
+		},
+		[]string{"app"},
+	)
+
+	connectedClients = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "zoidberg_proxy_connected",
+			Help: "number of connected clients",
+		},
+		[]string{"app"},
+	)
+
+	connectionErrors = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "zoidberg_proxy_connection_errors",
+			Help: "number of connection errors to upstreams",
+		},
+		[]string{"app", "upstream"},
+	)
+
+	proxyUpstreams = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "zoidberg_proxy_upstreams",
+			Help: "number of upstreams per proxy",
+		},
+		[]string{"app"},
+	)
+
+	proxyUpstreamUpdates = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "zoidberg_proxy_upstream_updates",
+			Help: "number of upstream updates per proxy",
+		},
+		[]string{"app"},
+	)
+
+	proxiesCreated = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "zoidberg_proxies_created",
+			Help: "number of proxies created",
+		},
+		[]string{"app"},
+	)
+
+	proxyCreationErrors = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "zoidberg_proxy_creation_errors",
+			Help: "number of proxies failed on creation",
+		},
+		[]string{"app"},
+	)
+)
+
+func init() {
+	prometheus.MustRegister(bytesSent)
+	prometheus.MustRegister(bytesReceived)
+	prometheus.MustRegister(connectionsAccepted)
+	prometheus.MustRegister(connectedClients)
+	prometheus.MustRegister(connectionErrors)
+	prometheus.MustRegister(proxyUpstreams)
+	prometheus.MustRegister(proxyUpstreamUpdates)
+	prometheus.MustRegister(proxiesCreated)
+	prometheus.MustRegister(proxyCreationErrors)
+}
+
 // proxy represents a tcp proxy with upstreams
 type proxy struct {
-	um sync.Mutex
-	u  upstreams
-	l  net.Listener
-	sm sync.Mutex
-	s  map[string]*upstreamStats
+	mutex     sync.Mutex
+	app       string
+	listener  net.Listener
+	upstreams Upstreams
+	labels    prometheus.Labels
 }
 
 // newProxy creates a new tcp proxy
-func newProxy(listen string) (*proxy, error) {
+func newProxy(app string, listen string) (*proxy, error) {
+	labels := prometheus.Labels{"app": app}
+
 	listener, err := net.Listen("tcp", listen)
 	if err != nil {
+		proxyCreationErrors.With(labels).Inc()
 		return nil, err
 	}
 
+	proxiesCreated.With(labels).Inc()
+
 	return &proxy{
-		l:  listener,
-		um: sync.Mutex{},
-		u:  []upstream{},
-		sm: sync.Mutex{},
-		s:  map[string]*upstreamStats{},
+		mutex:     sync.Mutex{},
+		app:       app,
+		listener:  listener,
+		upstreams: []Upstream{},
+		labels:    labels,
 	}, nil
-}
-
-// stats returns proxyStats with stats for upstreams,
-// that were ever used. If an upstream was never used,
-// there is no guarantee it is present in the result
-func (p *proxy) stats() proxyStats {
-	u := map[string]upstreamStats{}
-
-	p.sm.Lock()
-	for k, v := range p.s {
-		u[k] = *v
-	}
-	p.sm.Unlock()
-
-	return proxyStats{
-		Upstreams: u,
-	}
-}
-
-// upstreamStats return upstreamStats for specific upstream,
-// it allocates object lazily if needed
-func (p *proxy) upstreamStats(u string) *upstreamStats {
-	p.sm.Lock()
-
-	s := &upstreamStats{}
-	if es, ok := p.s[u]; !ok {
-		p.s[u] = s
-	} else {
-		s = es
-	}
-	p.sm.Unlock()
-
-	return s
 }
 
 // setState sets state for the proxy based on servers and their versions
 func (p *proxy) setState(port int, servers []application.Server, versions state.Versions) {
-	p.um.Lock()
+	p.mutex.Lock()
 
-	u := upstreams{}
+	upstreams := Upstreams{}
 
-	for _, s := range servers {
-		if len(s.Ports) < port {
-			log.Printf("requesed missing port %d from %s\n", port, s)
+	for _, server := range servers {
+		if len(server.Ports) < port {
+			log.Printf("requesed missing port %d from %s\n", port, server)
 			continue
 		}
 
-		w := 1
+		weight := 1
 		if len(versions) > 0 {
-			w = versions[s.Version].Weight
+			weight = versions[server.Version].Weight
 		}
 
-		if w == 0 {
+		if weight == 0 {
 			continue
 		}
 
-		u = append(u, upstream{
-			host:   s.Host,
-			port:   s.Ports[port],
-			weight: w,
+		upstreams = append(upstreams, Upstream{
+			host:   server.Host,
+			port:   server.Ports[port],
+			weight: weight,
 		})
 	}
 
-	sort.Sort(u)
+	sort.Sort(upstreams)
 
-	if !reflect.DeepEqual(u, p.u) {
-		p.u = u
-		log.Printf("updated upstreams for %s: %s\n", p.l.Addr(), u)
+	if !reflect.DeepEqual(upstreams, p.upstreams) {
+		p.upstreams = upstreams
+		log.Printf("updated upstreams for %s: %s\n", p.listener.Addr(), upstreams)
+		proxyUpstreamUpdates.With(p.labels).Inc()
+		proxyUpstreams.With(p.labels).Set(float64(len(p.upstreams)))
 	}
 
-	p.um.Unlock()
+	p.mutex.Unlock()
 }
 
 // start starts main proxy loop
 func (p *proxy) start() {
-	addr := p.l.Addr()
+	addr := p.listener.Addr()
 
 	for {
-		c, err := p.l.Accept()
+		client, err := p.listener.Accept()
 		if err != nil {
-			log.Printf("error on accept for %s: %s", addr, err)
+			log.Printf("error on accepting for %s: %s", addr, err)
 			continue
 		}
 
-		go p.serve(c.(*net.TCPConn))
+		connectionsAccepted.With(p.labels).Inc()
+
+		go p.serve(client.(*net.TCPConn))
 	}
 }
 
 // serve serves a single accepted connection
-func (p *proxy) serve(c *net.TCPConn) {
+func (p *proxy) serve(client *net.TCPConn) {
+	connected := connectedClients.With(p.labels)
+	connected.Inc()
+
 	defer func() {
-		_ = c.Close()
+		connected.Dec()
+		_ = client.Close()
 	}()
 
-	addr := p.l.Addr()
+	addr := p.listener.Addr()
 
-	p.um.Lock()
-	upstreams := make([]upstream, len(p.u))
-	copy(upstreams, p.u)
-	p.um.Unlock()
+	p.mutex.Lock()
+	upstreams := make([]Upstream, len(p.upstreams))
+	copy(upstreams, p.upstreams)
+	p.mutex.Unlock()
 
 	// TODO: proper iterator accounting weights and current # of connections
 	for i := range upstreams {
@@ -149,48 +215,28 @@ func (p *proxy) serve(c *net.TCPConn) {
 		upstreams[i], upstreams[j] = upstreams[j], upstreams[i]
 	}
 
-	for _, u := range upstreams {
-		s := p.upstreamStats(u.addr())
-
-		log.Printf("connecting to %s for %s..\n", u, addr)
-		r, err := net.Dial("tcp", u.addr())
+	for _, upstream := range upstreams {
+		log.Printf("connecting to %s for %s..\n", upstream, addr)
+		backend, err := net.Dial("tcp", upstream.Addr())
 		if err != nil {
-			p.sm.Lock()
-			s.Errors++
-			p.sm.Unlock()
-			log.Printf("error connecting for %s to %s: %s", addr, u.addr(), err)
+			log.Printf("error connecting for %s to %s: %s", addr, upstream.Addr(), err)
+			connectionErrors.With(prometheus.Labels{"app": p.app, "upstream": upstream.Addr()}).Inc()
 			continue
 		}
 
-		p.sm.Lock()
-		s.Connected++
-		s.Connections++
-		p.sm.Unlock()
-
-		defer func() {
-			p.sm.Lock()
-			s.Connected--
-			p.sm.Unlock()
-		}()
-
-		p.proxyLoop(c, r.(*net.TCPConn), s)
+		p.proxyLoop(client, backend.(*net.TCPConn))
 
 		break
 	}
 }
 
-// TODO: replace with some 3rd party package
 // https://github.com/docker/docker/blob/18c7c67308bd4a24a41028e63c2603bb74eac85e/pkg/proxy/tcp_proxy.go#L34
-func (p *proxy) proxyLoop(client, backend *net.TCPConn, s *upstreamStats) {
-	started := time.Now()
-
+func (p *proxy) proxyLoop(client, backend *net.TCPConn) {
 	event := make(chan struct{})
-	var broker = func(to, from *net.TCPConn, counter *uint64) {
+	var broker = func(to, from *net.TCPConn, c prometheus.Counter) {
 		for {
 			n, err := io.CopyN(to, from, copySize)
-			p.sm.Lock()
-			*counter += uint64(n)
-			p.sm.Unlock()
+			c.Add(float64(n))
 			if err != nil {
 				// If the socket we are writing to is shutdown with
 				// SHUT_WR, forward it to the other end of the pipe:
@@ -206,8 +252,11 @@ func (p *proxy) proxyLoop(client, backend *net.TCPConn, s *upstreamStats) {
 		event <- struct{}{}
 	}
 
-	go broker(client, backend, &s.Out)
-	go broker(backend, client, &s.In)
+	backendAddr := backend.RemoteAddr().String()
+	labels := prometheus.Labels{"app": p.app, "upstream": backendAddr}
+
+	go broker(client, backend, bytesSent.With(labels))
+	go broker(backend, client, bytesReceived.With(labels))
 
 	for i := 0; i < 2; i++ {
 		<-event
@@ -215,14 +264,4 @@ func (p *proxy) proxyLoop(client, backend *net.TCPConn, s *upstreamStats) {
 
 	_ = client.Close()
 	_ = backend.Close()
-
-	ca := client.RemoteAddr()
-	ba := backend.RemoteAddr()
-
-	elapsed := time.Now().Sub(started)
-
-	log.Printf(
-		"transferred %d bytes between %s and %s (%d in, %d out) in %v",
-		s.In+s.Out, ca, ba, s.In, s.Out, elapsed,
-	)
 }

@@ -2,26 +2,26 @@ package zoidbergtcp
 
 import "fmt"
 
-// upstream is a single upstream server
-type upstream struct {
+// Upstream is a single upstream server
+type Upstream struct {
 	host   string
 	port   int
 	weight int
 }
 
-// addr returns network address of an upstream
-func (u upstream) addr() string {
+// Addr returns network address of an upstream
+func (u Upstream) Addr() string {
 	return fmt.Sprintf("%s:%d", u.host, u.port)
 }
 
 // String returns string representation of an upstream
-func (u upstream) String() string {
-	return u.addr()
+func (u Upstream) String() string {
+	return u.Addr()
 }
 
-// upstreams is a list of upstreams
-type upstreams []upstream
+// Upstreams is a list of upstreams
+type Upstreams []Upstream
 
-func (u upstreams) Len() int           { return len(u) }
-func (u upstreams) Swap(i, j int)      { u[i], u[j] = u[j], u[i] }
-func (u upstreams) Less(i, j int) bool { return u[i].String() < u[j].String() }
+func (u Upstreams) Len() int           { return len(u) }
+func (u Upstreams) Swap(i, j int)      { u[i], u[j] = u[j], u[i] }
+func (u Upstreams) Less(i, j int) bool { return u[i].String() < u[j].String() }

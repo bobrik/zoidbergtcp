@@ -14,6 +14,11 @@ func main() {
 	listen := flag.String("listen", fmt.Sprintf("%s:%s", os.Getenv("HOST"), os.Getenv("PORT")), "listen address")
 	flag.Parse()
 
+	if *listen == ":" {
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
+
 	manager := zoidbergtcp.NewManager()
 
 	err := http.ListenAndServe(*listen, manager.ServeMux())
