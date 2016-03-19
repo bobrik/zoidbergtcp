@@ -20,9 +20,13 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/google/go-querystring/query"
 )
 
 type atomicSwitch int64
@@ -87,7 +91,7 @@ func getInterfaceAddress(name string) (string, error) {
 			}
 			// step: return the first address
 			if len(addrs) > 0 {
-				return strings.SplitN(addrs[0].String(), "/", 2)[0], nil
+				return parseIPAddr(addrs[0]), nil
 			}
 		}
 	}
@@ -102,4 +106,30 @@ func contains(elements []string, value string) bool {
 		}
 	}
 	return false
+}
+
+func parseIPAddr(addr net.Addr) string {
+	return strings.SplitN(addr.String(), "/", 2)[0]
+}
+
+// addOptions adds the parameters in opt as URL query parameters to s.
+// opt must be a struct whose fields may contain "url" tags.
+func addOptions(s string, opt interface{}) (string, error) {
+	v := reflect.ValueOf(opt)
+	if v.Kind() == reflect.Ptr && v.IsNil() {
+		return s, nil
+	}
+
+	u, err := url.Parse(s)
+	if err != nil {
+		return s, err
+	}
+
+	qs, err := query.Values(opt)
+	if err != nil {
+		return s, err
+	}
+
+	u.RawQuery = qs.Encode()
+	return u.String(), nil
 }
