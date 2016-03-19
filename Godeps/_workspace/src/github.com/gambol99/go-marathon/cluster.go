@@ -58,6 +58,8 @@ type marathonCluster struct {
 	protocol string
 	// the current host
 	active *marathonNode
+	// the http client
+	client *http.Client
 }
 
 // String returns a string representation of the cluster
@@ -84,8 +86,7 @@ func (member marathonNode) String() string {
 	return fmt.Sprintf("member: %s:%s", member.hostname, status)
 }
 
-func newCluster(marathonURL string) (Cluster, error) {
-	cluster := new(marathonCluster)
+func newCluster(client *http.Client, marathonURL string) (Cluster, error) {
 	// step: parse the marathon url
 	marathon, err := url.Parse(marathonURL)
 	if err != nil {
@@ -96,12 +97,20 @@ func newCluster(marathonURL string) (Cluster, error) {
 	if marathon.Scheme != "http" && marathon.Scheme != "https" {
 		return nil, ErrInvalidEndpoint
 	}
-	cluster.protocol = marathon.Scheme
-	cluster.url = marathonURL
+
+	cluster := &marathonCluster{
+		client:   client,
+		protocol: marathon.Scheme,
+		url:      marathonURL,
+	}
 
 	/* step: create a link list of the hosts */
 	var previous *marathonNode
 	for index, host := range strings.SplitN(marathon.Host, ",", -1) {
+		if len(host) == 0 {
+			return nil, ErrInvalidEndpoint
+		}
+
 		// step: create a new cluster member
 		node := new(marathonNode)
 		node.hostname = host
@@ -163,11 +172,12 @@ func (r *marathonCluster) GetMember() (string, error) {
 		if r.active.next != nil {
 			r.active = r.active.next
 		} else {
-			return "", errors.New("no cluster memebers available at the moment")
+			return "", errors.New("no cluster members available at the moment")
 		}
 	}
 
 	// we reached the end and there were no members available
+	defer r.MarkDown()
 	return "", ErrMarathonDown
 }
 
@@ -187,7 +197,7 @@ func (r *marathonCluster) MarkDown() {
 	// step: create a go-routine to place the member back in
 	go func() {
 		for {
-			response, err := http.Get(r.GetMarathonURL(node) + "/ping")
+			response, err := r.client.Get(r.GetMarathonURL(node) + "/ping")
 			if err == nil && response.StatusCode == 200 {
 				node.status = marathonNodeUp
 				return
