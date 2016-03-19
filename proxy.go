@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"sort"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/bobrik/zoidberg/application"
 	"github.com/bobrik/zoidberg/state"
@@ -15,7 +17,7 @@ import (
 
 // copySize defines the size of a chunk that is used when copying data,
 // it also defines minimum granularity for stats
-const copySize = 1024
+const copySize = 4096
 
 // proxy represents a tcp proxy with upstreams
 type proxy struct {
@@ -124,12 +126,12 @@ func (p *proxy) start() {
 			continue
 		}
 
-		go p.serve(c)
+		go p.serve(c.(*net.TCPConn))
 	}
 }
 
 // serve serves a single accepted connection
-func (p *proxy) serve(c net.Conn) {
+func (p *proxy) serve(c *net.TCPConn) {
 	defer func() {
 		_ = c.Close()
 	}()
@@ -166,50 +168,61 @@ func (p *proxy) serve(c net.Conn) {
 		p.sm.Unlock()
 
 		defer func() {
-			_ = r.Close()
-
 			p.sm.Lock()
 			s.Connected--
 			p.sm.Unlock()
 		}()
 
-		err = p.copy(c, r, s)
-		if err != nil && err != io.EOF {
-			log.Printf("error proxying for %s from %s to %s: %s", addr, c.RemoteAddr(), u.addr(), err)
-			return
-		}
+		p.proxyLoop(c, r.(*net.TCPConn), s)
 
-		return
+		break
 	}
 }
 
-// copy copies data between two connections and writes stats
-func (p *proxy) copy(client, upstream io.ReadWriter, s *upstreamStats) error {
-	ch := make(chan error, 1)
+// TODO: replace with some 3rd party package
+// https://github.com/docker/docker/blob/18c7c67308bd4a24a41028e63c2603bb74eac85e/pkg/proxy/tcp_proxy.go#L34
+func (p *proxy) proxyLoop(client, backend *net.TCPConn, s *upstreamStats) {
+	started := time.Now()
 
-	go p.chanCopy(ch, client, upstream, &s.Out)
-	go p.chanCopy(ch, upstream, client, &s.In)
+	event := make(chan struct{})
+	var broker = func(to, from *net.TCPConn, counter *uint64) {
+		for {
+			n, err := io.CopyN(to, from, copySize)
+			p.sm.Lock()
+			*counter += uint64(n)
+			p.sm.Unlock()
+			if err != nil {
+				// If the socket we are writing to is shutdown with
+				// SHUT_WR, forward it to the other end of the pipe:
+				if err, ok := err.(*net.OpError); ok && err.Err == syscall.EPIPE {
+					_ = from.CloseWrite()
+				}
+
+				break
+			}
+		}
+
+		_ = to.CloseRead()
+		event <- struct{}{}
+	}
+
+	go broker(client, backend, &s.Out)
+	go broker(backend, client, &s.In)
 
 	for i := 0; i < 2; i++ {
-		return <-ch
+		<-event
 	}
 
-	return nil
-}
+	_ = client.Close()
+	_ = backend.Close()
 
-// chanCopy copies data from source to destination and increments counter
-// with the number of bytes copied, it returns an error in the supplied channel
-func (p *proxy) chanCopy(ch chan error, dst io.Writer, src io.Reader, counter *uint64) {
-	for {
-		n, err := io.CopyN(dst, src, copySize)
+	ca := client.RemoteAddr()
+	ba := backend.RemoteAddr()
 
-		p.sm.Lock()
-		*counter += uint64(n)
-		p.sm.Unlock()
+	elapsed := time.Now().Sub(started)
 
-		if err != nil {
-			ch <- err
-			break
-		}
-	}
+	log.Printf(
+		"transferred %d bytes between %s and %s (%d in, %d out) in %v",
+		s.In+s.Out, ca, ba, s.In, s.Out, elapsed,
+	)
 }
