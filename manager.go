@@ -10,6 +10,7 @@ import (
 	"github.com/bobrik/zoidberg/application"
 	"github.com/bobrik/zoidberg/balancer"
 	"github.com/bobrik/zoidberg/state"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // Manager manages proxies
@@ -42,24 +43,7 @@ func (m *Manager) ServeMux() *http.ServeMux {
 		m.UpdateState(state)
 	})
 
-	mux.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
-		p := map[string]proxyStats{}
-
-		m.mutex.Lock()
-		for k, v := range m.proxies {
-			p[k] = v.stats()
-		}
-		m.mutex.Unlock()
-
-		s, err := json.Marshal(stats{Servers: p})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Add("Content-type", "application/json")
-		_, _ = w.Write(s)
-	})
+	mux.Handle("/metrics", prometheus.Handler())
 
 	mux.HandleFunc("/_health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -94,26 +78,29 @@ func (m *Manager) updateAppProxies(app application.App, versions state.Versions)
 			continue
 		}
 
-		l := app.Meta[fmt.Sprintf("port_%d_listen", i)]
-		if l == "" {
+		listen := app.Meta[fmt.Sprintf("port_%d_listen", i)]
+		if listen == "" {
 			log.Printf("app %s port %d: no listen\n", app.Name, i)
 			continue
 		}
 
-		if proxy, ok := m.proxies[l]; ok {
+		if proxy, ok := m.proxies[listen]; ok {
+			if proxy.app != app.Name {
+				log.Printf("app %s to overwrites liste of app %s: %s", app.Name, proxy.app, listen)
+			}
 			proxy.setState(i, app.Servers, versions)
 			continue
 		}
 
-		proxy, err := newProxy(l)
+		proxy, err := newProxy(app.Name, listen)
 		if err != nil {
-			log.Printf("error creating proxy for %s: %s\n", l, err)
+			log.Printf("error creating proxy for %s: %s\n", listen, err)
 			continue
 		}
 
 		proxy.setState(i, app.Servers, versions)
 		go proxy.start()
 
-		m.proxies[l] = proxy
+		m.proxies[listen] = proxy
 	}
 }
