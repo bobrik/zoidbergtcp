@@ -136,17 +136,12 @@ func newProxy(app string, listen string) (*proxy, error) {
 }
 
 // setState sets state for the proxy based on servers and their versions
-func (p *proxy) setState(port int, servers []application.Server, versions state.Versions) {
+func (p *proxy) setState(servers []application.Server, versions state.Versions) {
 	p.mutex.Lock()
 
 	upstreams := Upstreams{}
 
 	for _, server := range servers {
-		if len(server.Ports) < port {
-			log.Printf("requesed missing port %d from %s\n", port, server)
-			continue
-		}
-
 		weight := 1
 		if len(versions) > 0 {
 			weight = versions[server.Version].Weight
@@ -158,7 +153,7 @@ func (p *proxy) setState(port int, servers []application.Server, versions state.
 
 		upstreams = append(upstreams, Upstream{
 			host:   server.Host,
-			port:   server.Ports[port],
+			port:   server.Port,
 			weight: weight,
 		})
 	}
@@ -167,7 +162,7 @@ func (p *proxy) setState(port int, servers []application.Server, versions state.
 
 	if !reflect.DeepEqual(upstreams, p.upstreams) {
 		p.upstreams = upstreams
-		log.Printf("updated upstreams for %s: %s\n", p.listener.Addr(), upstreams)
+		log.Printf("updated upstreams for %s: %s", p.listener.Addr(), upstreams)
 		proxyUpstreamUpdates.With(p.labels).Inc()
 		proxyUpstreams.With(p.labels).Set(float64(len(p.upstreams)))
 	}
@@ -216,7 +211,7 @@ func (p *proxy) serve(client *net.TCPConn) {
 	}
 
 	for _, upstream := range upstreams {
-		log.Printf("connecting to %s for %s..\n", upstream, addr)
+		log.Printf("connecting to %s for %s..", upstream, addr)
 		backend, err := net.Dial("tcp", upstream.Addr())
 		if err != nil {
 			log.Printf("error connecting for %s to %s: %s", addr, upstream.Addr(), err)

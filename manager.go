@@ -2,7 +2,6 @@ package zoidbergtcp
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -65,42 +64,29 @@ func (m *Manager) UpdateState(s balancer.State) {
 // updateAppProxies updates upstreams for running proxies
 // and starts new proxies if needed
 func (m *Manager) updateAppProxies(app application.App, versions state.Versions) {
-	p := 0
-	for _, s := range app.Servers {
-		if len(s.Ports) > p {
-			p = len(s.Ports)
-		}
+	listen := app.Meta["listen"]
+
+	if listen == "" {
+		log.Printf("app %s does not have listen set in meta", app.Name)
+		return
 	}
 
-	for i := 0; i < p; i++ {
-		if app.Meta[fmt.Sprintf("port_%d_type", i)] != "tcp" {
-			log.Printf("app %s port %d: not tcp\n", app.Name, i)
-			continue
+	if proxy, ok := m.proxies[listen]; ok {
+		if proxy.app != app.Name {
+			log.Printf("app %s to overwrites listen of app %s: %s", app.Name, proxy.app, listen)
 		}
-
-		listen := app.Meta[fmt.Sprintf("port_%d_listen", i)]
-		if listen == "" {
-			log.Printf("app %s port %d: no listen\n", app.Name, i)
-			continue
-		}
-
-		if proxy, ok := m.proxies[listen]; ok {
-			if proxy.app != app.Name {
-				log.Printf("app %s to overwrites liste of app %s: %s", app.Name, proxy.app, listen)
-			}
-			proxy.setState(i, app.Servers, versions)
-			continue
-		}
-
-		proxy, err := newProxy(app.Name, listen)
-		if err != nil {
-			log.Printf("error creating proxy for %s: %s\n", listen, err)
-			continue
-		}
-
-		proxy.setState(i, app.Servers, versions)
-		go proxy.start()
-
-		m.proxies[listen] = proxy
+		proxy.setState(app.Servers, versions)
+		return
 	}
+
+	proxy, err := newProxy(app.Name, listen)
+	if err != nil {
+		log.Printf("error creating proxy for app %s: %s", listen, err)
+		return
+	}
+
+	proxy.setState(app.Servers, versions)
+	go proxy.start()
+
+	m.proxies[listen] = proxy
 }

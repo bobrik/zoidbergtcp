@@ -17,7 +17,7 @@ This runs `zoidberg-tcp` with management interface on `http://127.0.0.1:12345`:
 ```
 docker run -rm -it --net host \
   -e HOST=127.0.0.1 -e PORT=12345 \
-  bobrik/zoidberg-tcp:0.1.0
+  bobrik/zoidberg-tcp:0.3.0
 ```
 
 It's up to you how to discover launched balancer in
@@ -29,18 +29,19 @@ and dynamic (`mesos` or `marathon` finders) are supported.
 For `mesos` and `marathon` finders the following labels should be set
 to make app available:
 
-* `zoidberg_app_name` application name, doesn't really matter now.
-* `zoidberg_balanced_by` load balancer name to announce.
-* `zoidberg_meta_port_X_type` set port at index `X` to the mode `tcp`.
-* `zoidberg_meta_port_X_listen` set listen (`host:port`) for port at index X.
+* `zoidberg_port_X_app_name` application name, doesn't really matter now.
+* `zoidberg_port_X_balanced_by` load balancer name to announce.
+* `zoidberg_port_X_listen` set listen address (`host:port`).
+
+Here `X` is the port index. Each port creates a separate app so you can
+expose them through different load balancers.
 
 Example:
 
 ```yaml
-zoidberg_app_name: myapp.example.com
-zoidberg_balanced_by: example-lb-tcp
-zoidberg_meta_port_0_type: tcp
-zoidberg_meta_port_0_listen: 127.0.0.1:23232
+zoidberg_port_0_app_name: myapp.example.com
+zoidberg_port_0_balanced_by: example-lb-tcp
+zoidberg_port_0_listen: 127.0.0.1:23232
 ```
 
 Application with these labels will be announced on all load balancers with name
@@ -52,7 +53,7 @@ with `zoidberg-tcp` when some ports are HTTP and some ports are plain TCP.
 
 ## Stats endpoint
 
-`GET /metrics` returns metrics in prometheus format.
+`GET /metrics` returns metrics in prometheus format from management endpoint.
 
 ## TODO
 
