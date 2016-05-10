@@ -1,7 +1,6 @@
 language: go
 
 go:
-  - 1.5
   - 1.6
   - tip
 
@@ -9,5 +8,4 @@ before_script:
   - go install ./...
   - go get github.com/alecthomas/gometalinter
   - gometalinter --install --update
-  # disabled checks fail on tip
-  - gometalinter --deadline 60s -D structcheck -D aligncheck ./...
+  - GO15VENDOREXPERIMENT=1 gometalinter --deadline 60s ./...
