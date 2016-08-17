@@ -1,6 +1,7 @@
 package zoidbergtcp
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"math/rand"
@@ -109,6 +110,7 @@ func init() {
 type proxy struct {
 	mutex     sync.Mutex
 	app       string
+	listen    string
 	listener  net.Listener
 	upstreams Upstreams
 	labels    prometheus.Labels
@@ -129,6 +131,7 @@ func newProxy(app string, listen string) (*proxy, error) {
 	return &proxy{
 		mutex:     sync.Mutex{},
 		app:       app,
+		listen:    listen,
 		listener:  listener,
 		upstreams: []Upstream{},
 		labels:    labels,
@@ -162,7 +165,7 @@ func (p *proxy) setState(servers []application.Server, versions state.Versions) 
 
 	if !reflect.DeepEqual(upstreams, p.upstreams) {
 		p.upstreams = upstreams
-		log.Printf("updated upstreams for %s: %s", p.listener.Addr(), upstreams)
+		p.log(fmt.Sprintf("updated upstreams: %s", upstreams))
 		proxyUpstreamUpdates.With(p.labels).Inc()
 		proxyUpstreams.With(p.labels).Set(float64(len(p.upstreams)))
 	}
@@ -172,12 +175,10 @@ func (p *proxy) setState(servers []application.Server, versions state.Versions) 
 
 // start starts main proxy loop
 func (p *proxy) start() {
-	addr := p.listener.Addr()
-
 	for {
 		client, err := p.listener.Accept()
 		if err != nil {
-			log.Printf("error on accepting for %s: %s", addr, err)
+			p.log(fmt.Sprintf("error on accepting: %s", err))
 			continue
 		}
 
@@ -197,8 +198,6 @@ func (p *proxy) serve(client *net.TCPConn) {
 		_ = client.Close()
 	}()
 
-	addr := p.listener.Addr()
-
 	p.mutex.Lock()
 	upstreams := make([]Upstream, len(p.upstreams))
 	copy(upstreams, p.upstreams)
@@ -211,10 +210,10 @@ func (p *proxy) serve(client *net.TCPConn) {
 	}
 
 	for _, upstream := range upstreams {
-		log.Printf("connecting to %s for %s..", upstream, addr)
+		p.log(fmt.Sprintf("connecting from %s to %s", client.RemoteAddr(), upstream))
 		backend, err := net.Dial("tcp", upstream.Addr())
 		if err != nil {
-			log.Printf("error connecting for %s to %s: %s", addr, upstream.Addr(), err)
+			p.log(fmt.Sprintf("error connecting from %s to %s: %s", client.RemoteAddr(), upstream.Addr(), err))
 			connectionErrors.With(prometheus.Labels{"app": p.app, "upstream": upstream.Addr()}).Inc()
 			continue
 		}
@@ -259,4 +258,10 @@ func (p *proxy) proxyLoop(client, backend *net.TCPConn) {
 
 	_ = client.Close()
 	_ = backend.Close()
+
+	p.log(fmt.Sprintf("closed connection from %s to %s", client.RemoteAddr(), backend.RemoteAddr()))
+}
+
+func (p *proxy) log(msg string) {
+	log.Printf("proxy[app=%s, listen=%s]: %s", p.app, p.listen, msg)
 }
