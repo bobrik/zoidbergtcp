@@ -226,6 +226,14 @@ func (p *proxy) serve(client *net.TCPConn) {
 
 // https://github.com/docker/docker/blob/18c7c67308bd4a24a41028e63c2603bb74eac85e/pkg/proxy/tcp_proxy.go#L34
 func (p *proxy) proxyLoop(client, backend *net.TCPConn) {
+	if err := client.SetKeepAlive(true); err != nil {
+		p.log(fmt.Sprintf("failed to enable keepalive for client %s: %s", client.RemoteAddr(), err))
+	}
+
+	if err := backend.SetKeepAlive(true); err != nil {
+		p.log(fmt.Sprintf("failed to enable keepalive for backend %s: %s", backend.RemoteAddr(), err))
+	}
+
 	event := make(chan struct{})
 	var broker = func(to, from *net.TCPConn, c prometheus.Counter) {
 		for {
