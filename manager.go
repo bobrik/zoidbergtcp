@@ -9,7 +9,7 @@ import (
 	"github.com/bobrik/zoidberg/application"
 	"github.com/bobrik/zoidberg/balancer"
 	"github.com/bobrik/zoidberg/state"
-	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // Manager manages proxies
@@ -42,7 +42,7 @@ func (m *Manager) ServeMux() *http.ServeMux {
 		m.UpdateState(state)
 	})
 
-	mux.Handle("/metrics", prometheus.Handler())
+	mux.Handle("/metrics", promhttp.Handler())
 
 	mux.HandleFunc("/_health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
