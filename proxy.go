@@ -111,7 +111,7 @@ type proxy struct {
 	mutex     sync.Mutex
 	app       string
 	listen    string
-	listener  net.Listener
+	listeners []net.Listener
 	upstreams Upstreams
 	labels    prometheus.Labels
 }
@@ -120,10 +120,26 @@ type proxy struct {
 func newProxy(app string, listen string) (*proxy, error) {
 	labels := prometheus.Labels{"app": app}
 
-	listener, err := net.Listen("tcp", listen)
+	hostname, port, err := net.SplitHostPort(listen)
 	if err != nil {
-		proxyCreationErrors.With(labels).Inc()
 		return nil, err
+	}
+
+	addrs, err := net.LookupHost(hostname)
+	if err != nil {
+		return nil, err
+	}
+
+	listeners := make([]net.Listener, len(addrs))
+
+	for i, addr := range addrs {
+		listener, err := net.Listen("tcp", net.JoinHostPort(addr, port))
+		if err != nil {
+			proxyCreationErrors.With(labels).Inc()
+			return nil, err
+		}
+
+		listeners[i] = listener
 	}
 
 	proxiesCreated.With(labels).Inc()
@@ -132,7 +148,7 @@ func newProxy(app string, listen string) (*proxy, error) {
 		mutex:     sync.Mutex{},
 		app:       app,
 		listen:    listen,
-		listener:  listener,
+		listeners: listeners,
 		upstreams: []Upstream{},
 		labels:    labels,
 	}, nil
@@ -175,16 +191,21 @@ func (p *proxy) setState(servers []application.Server, versions state.Versions) 
 
 // start starts main proxy loop
 func (p *proxy) start() {
-	for {
-		client, err := p.listener.Accept()
-		if err != nil {
-			p.log(fmt.Sprintf("error on accepting: %s", err))
-			continue
-		}
+	for _, listener := range p.listeners {
+		go func(listener net.Listener) {
+			p.log(fmt.Sprintf("started listening on %s", listener.Addr()))
+			for {
+				client, err := listener.Accept()
+				if err != nil {
+					p.log(fmt.Sprintf("error on accepting: %s", err))
+					continue
+				}
 
-		connectionsAccepted.With(p.labels).Inc()
+				connectionsAccepted.With(p.labels).Inc()
 
-		go p.serve(client.(*net.TCPConn))
+				go p.serve(client.(*net.TCPConn))
+			}
+		}(listener)
 	}
 }
 
